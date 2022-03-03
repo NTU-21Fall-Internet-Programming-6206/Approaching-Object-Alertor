@@ -15,13 +15,16 @@ class VisionObjectRecognitionViewController: ViewController {
     
     // Vision parts
     private var requests = [VNRequest]()
+    // Speech parts
+    let syntesizer = AVSpeechSynthesizer()
+    var utterance = AVSpeechUtterance()
     
     @discardableResult
     func setupVision() -> NSError? {
         // Setup Vision parts
         let error: NSError! = nil
         
-        guard let modelURL = Bundle.main.url(forResource: "YOLOv3Tiny", withExtension: "mlmodelc") else {
+        guard let modelURL = Bundle.main.url(forResource: "YOLOv3Int8LUT", withExtension: "mlmodelc") else {
             return NSError(domain: "VisionObjectRecognitionViewController", code: -1, userInfo: [NSLocalizedDescriptionKey: "Model file is missing"])
         }
         do {
@@ -53,9 +56,11 @@ class VisionObjectRecognitionViewController: ViewController {
             // Select only the label with the highest confidence.
             let topLabelObservation = objectObservation.labels[0]
             print(topLabelObservation.identifier, topLabelObservation.confidence)
+            
             if topLabelObservation.confidence < 0.6 {
                 continue
             }
+            
             let objectBounds = VNImageRectForNormalizedRect(objectObservation.boundingBox, Int(bufferSize.width), Int(bufferSize.height))
             
             let shapeLayer = self.createRoundedRectLayerWithBounds(objectBounds)
@@ -63,6 +68,14 @@ class VisionObjectRecognitionViewController: ViewController {
             let textLayer = self.createTextSubLayerInBounds(objectBounds,
                                                             identifier: topLabelObservation.identifier,
                                                             confidence: topLabelObservation.confidence)
+            
+            /*
+             add speech
+             */
+            utterance = AVSpeechUtterance(string: String(topLabelObservation.identifier))
+            utterance.rate = 0.7
+            syntesizer.speak(utterance)
+            
             shapeLayer.addSublayer(textLayer)
             detectionOverlay.addSublayer(shapeLayer)
         }
@@ -84,6 +97,11 @@ class VisionObjectRecognitionViewController: ViewController {
             print(error)
         }
     }
+    
+    func depthDataOutput(_ output: AVCaptureDepthDataOutput, didOutput depthData: AVDepthData, timestamp: CMTime, connection: AVCaptureConnection) {
+        print(depthData)
+    }
+
     
     override func setupAVCapture() {
         super.setupAVCapture()

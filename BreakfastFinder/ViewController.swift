@@ -9,7 +9,7 @@ import UIKit
 import AVFoundation
 import Vision
 
-class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
+class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureDepthDataOutputDelegate {
     
     var bufferSize: CGSize = .zero
     var rootLayer: CALayer! = nil
@@ -18,8 +18,11 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
     private let session = AVCaptureSession()
     private var previewLayer: AVCaptureVideoPreviewLayer! = nil
     private let videoDataOutput = AVCaptureVideoDataOutput()
+    private let videoDepthDataOutput = AVCaptureDepthDataOutput()
     
     private let videoDataOutputQueue = DispatchQueue(label: "VideoDataOutput", qos: .userInitiated, attributes: [], autoreleaseFrequency: .workItem)
+    
+    private let depthDataOutputQueue = DispatchQueue(label: "data queue", qos: .userInitiated, attributes: [], autoreleaseFrequency: .workItem)
     
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         // to be implemented in the subclass
@@ -39,9 +42,10 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
         var deviceInput: AVCaptureDeviceInput!
         
         // Select a video device, make an input
-        let videoDevice = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera], mediaType: .video, position: .back).devices.first
+        let videoDevice = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInDualCamera], mediaType: .video, position: .back).devices.first
         do {
             deviceInput = try AVCaptureDeviceInput(device: videoDevice!)
+            //print(videoDevice)
         } catch {
             print("Could not create video device input: \(error)")
             return
@@ -63,11 +67,26 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
             videoDataOutput.alwaysDiscardsLateVideoFrames = true
             videoDataOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)]
             videoDataOutput.setSampleBufferDelegate(self, queue: videoDataOutputQueue)
+            
+            
+            session.addOutput(videoDepthDataOutput)
+            videoDepthDataOutput.alwaysDiscardsLateDepthData = true
+            videoDepthDataOutput.setDelegate(self, callbackQueue: depthDataOutputQueue)
+            
+            print()
+            
         } else {
             print("Could not add video data output to the session")
             session.commitConfiguration()
             return
         }
+        
+        
+        // ADD
+        
+        
+        
+        
         let captureConnection = videoDataOutput.connection(with: .video)
         // Always process the frames
         captureConnection?.isEnabled = true
@@ -80,6 +99,11 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
         } catch {
             print(error)
         }
+        
+        
+        let depthConnection = videoDepthDataOutput.connection(with: .depthData)
+        depthConnection?.videoOrientation = .portrait
+        
         session.commitConfiguration()
         previewLayer = AVCaptureVideoPreviewLayer(session: session)
         previewLayer.videoGravity = AVLayerVideoGravity.resizeAspectFill
@@ -102,6 +126,7 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
         // print("frame dropped")
     }
     
+        
     public func exifOrientationFromDeviceOrientation() -> CGImagePropertyOrientation {
         let curDeviceOrientation = UIDevice.current.orientation
         let exifOrientation: CGImagePropertyOrientation

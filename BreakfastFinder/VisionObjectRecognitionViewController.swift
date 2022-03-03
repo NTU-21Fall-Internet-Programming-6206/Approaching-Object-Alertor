@@ -15,6 +15,9 @@ class VisionObjectRecognitionViewController: ViewController {
     
     // Vision parts
     private var requests = [VNRequest]()
+    // Depth parts
+    private var depthMatrix = UnsafeMutablePointer<Float32>.self
+    
     // Speech parts
     let syntesizer = AVSpeechSynthesizer()
     var utterance = AVSpeechUtterance()
@@ -63,6 +66,8 @@ class VisionObjectRecognitionViewController: ViewController {
             
             let objectBounds = VNImageRectForNormalizedRect(objectObservation.boundingBox, Int(bufferSize.width), Int(bufferSize.height))
             
+            
+            
             let shapeLayer = self.createRoundedRectLayerWithBounds(objectBounds)
             
             let textLayer = self.createTextSubLayerInBounds(objectBounds,
@@ -100,6 +105,30 @@ class VisionObjectRecognitionViewController: ViewController {
     
     func depthDataOutput(_ output: AVCaptureDepthDataOutput, didOutput depthData: AVDepthData, timestamp: CMTime, connection: AVCaptureConnection) {
         print(depthData)
+        print(depthData.depthDataMap)
+        
+        //## Convert Disparity to Depth ##
+
+           let depthDataMap = depthData.depthDataMap //AVDepthData -> CVPixelBuffer
+
+           //## Data Analysis ##
+
+           // Useful data
+           let width = CVPixelBufferGetWidth(depthDataMap) //768 on an iPhone 7+
+           let height = CVPixelBufferGetHeight(depthDataMap) //576 on an iPhone 7+
+           CVPixelBufferLockBaseAddress(depthDataMap, CVPixelBufferLockFlags(rawValue: 0))
+
+           // Convert the base address to a safe pointer of the appropriate type
+        self.depthMatrix = unsafeBitCast(CVPixelBufferGetBaseAddress(depthDataMap), to: UnsafeMutablePointer<Float32>.self)
+
+           // Read the data (returns value of type Float)
+           // Accessible values : (width-1) * (height-1) = 767 * 575
+        
+        print(floatBuffer)
+
+           let distanceAtXYPoint = floatBuffer[Int(8 * 8)]
+        
+        print(distanceAtXYPoint)
     }
 
     

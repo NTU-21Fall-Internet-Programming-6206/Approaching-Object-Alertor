@@ -9,6 +9,7 @@ import UIKit
 import AVFoundation
 import Vision
 
+@available(iOS 15.4, *)
 class VisionObjectRecognitionViewController: ViewController {
     
     private var detectionOverlay: CALayer! = nil
@@ -16,7 +17,12 @@ class VisionObjectRecognitionViewController: ViewController {
     // Vision parts
     private var requests = [VNRequest]()
     // Depth parts
-    private var depthMatrix = UnsafeMutablePointer<Float32>.self
+    //
+    // key: name
+    // value: [depth 1, depth 2, ]
+    
+    private var objectPosition = [String: CGRect]()
+    private var objectDepth = [String: Float32]()
     
     // Speech parts
     let syntesizer = AVSpeechSynthesizer()
@@ -32,8 +38,11 @@ class VisionObjectRecognitionViewController: ViewController {
         }
         do {
             let visionModel = try VNCoreMLModel(for: MLModel(contentsOf: modelURL))
+            
+            
+            self.objectPosition.removeAll()
             let objectRecognition = VNCoreMLRequest(model: visionModel, completionHandler: { (request, error) in
-                DispatchQueue.main.async(execute: {
+                DispatchQueue.main.sync(execute: {
                     // perform all the UI updates on the main queue
                     if let results = request.results {
                         self.drawVisionRequestResults(results)
@@ -41,6 +50,7 @@ class VisionObjectRecognitionViewController: ViewController {
                 })
             })
             self.requests = [objectRecognition]
+            self.objectPosition.removeAll()
         } catch let error as NSError {
             print("Model loading went wrong: \(error)")
         }
@@ -58,7 +68,7 @@ class VisionObjectRecognitionViewController: ViewController {
             }
             // Select only the label with the highest confidence.
             let topLabelObservation = objectObservation.labels[0]
-            print(topLabelObservation.identifier, topLabelObservation.confidence)
+            //print(topLabelObservation.identifier, topLabelObservation.confidence)
             
             if topLabelObservation.confidence < 0.6 {
                 continue
@@ -74,12 +84,8 @@ class VisionObjectRecognitionViewController: ViewController {
                                                             identifier: topLabelObservation.identifier,
                                                             confidence: topLabelObservation.confidence)
             
-            /*
-             add speech
-             */
-            utterance = AVSpeechUtterance(string: String(topLabelObservation.identifier))
-            utterance.rate = 0.7
-            syntesizer.speak(utterance)
+            self.objectPosition.updateValue(objectBounds, forKey: topLabelObservation.identifier)
+            
             
             shapeLayer.addSublayer(textLayer)
             detectionOverlay.addSublayer(shapeLayer)
@@ -104,37 +110,77 @@ class VisionObjectRecognitionViewController: ViewController {
     }
     
     func depthDataOutput(_ output: AVCaptureDepthDataOutput, didOutput depthData: AVDepthData, timestamp: CMTime, connection: AVCaptureConnection) {
-        print(depthData)
-        print(depthData.depthDataMap)
         
         //## Convert Disparity to Depth ##
 
-           let depthDataMap = depthData.depthDataMap //AVDepthData -> CVPixelBuffer
+        let depthDataMap = depthData.depthDataMap //AVDepthData -> CVPixelBuffer
 
-           //## Data Analysis ##
+        //## Data Analysis ##
+        CVPixelBufferLockBaseAddress(depthDataMap, CVPixelBufferLockFlags(rawValue: 0))
+        let depthPointer = unsafeBitCast(CVPixelBufferGetBaseAddress(depthDataMap), to: UnsafeMutablePointer<Float32>.self)
+        
+        
 
-           // Useful data
-           let width = CVPixelBufferGetWidth(depthDataMap) //768 on an iPhone 7+
-           let height = CVPixelBufferGetHeight(depthDataMap) //576 on an iPhone 7+
-           CVPixelBufferLockBaseAddress(depthDataMap, CVPixelBufferLockFlags(rawValue: 0))
+        // Useful data
+        let width = CVPixelBufferGetWidth(depthDataMap) //768 on an iPhone 7+
+        let height = CVPixelBufferGetHeight(depthDataMap) //576 on an iPhone 7+
+        
+        
+        
+        for (key, value) in self.objectPosition {
+            let point = CGPoint(x: value.midX, y: value.midY)
+            
+            let resizePoint = CGPoint(x: value.midX / 2, y: value.midY / 2)
+            
+            let distanceAtXYPoint = depthPointer[Int(resizePoint.y * CGFloat(width) + resizePoint.x)]
+            //print("depthdata", depthData)
+            print("last distance", self.objectDepth[key])
+            print("distance", distanceAtXYPoint)
+            print(self.objectPosition)
+            
+            if self.objectDepth[key] != nil && ((self.objectDepth[key]! * 10000) < distanceAtXYPoint) {
+                
+                /*
+                 add speech
+                 */
+                utterance = AVSpeechUtterance(string: String(key) + "is approaching!")
+                utterance.rate = 0.5
+                syntesizer.speak(utterance)
+                sleep(3)
+                syntesizer.stopSpeaking(at: AVSpeechBoundary.word)
+            }
+            print("distance before update", distanceAtXYPoint)
+            self.objectDepth.updateValue(distanceAtXYPoint, forKey: key)
+        }
+        self.objectPosition.removeAll()
+        
+        
+        
+        
+           //CVPixelBufferLockBaseAddress(depthDataMap, CVPixelBufferLockFlags(rawValue: 0))
 
            // Convert the base address to a safe pointer of the appropriate type
-        self.depthMatrix = unsafeBitCast(CVPixelBufferGetBaseAddress(depthDataMap), to: UnsafeMutablePointer<Float32>.self)
+//        self.depthMatrix = unsafeBitCast(CVPixelBufferGetBaseAddress(depthDataMap), to: UnsafeMutablePointer<Float32>.self)
 
            // Read the data (returns value of type Float)
            // Accessible values : (width-1) * (height-1) = 767 * 575
         
-        print(floatBuffer)
-
-           let distanceAtXYPoint = floatBuffer[Int(8 * 8)]
-        
-        print(distanceAtXYPoint)
+//        print(floatBuffer)
+//
+//           let distanceAtXYPoint = floatBuffer[Int(8 * 8)]
+//        
+//        print(distanceAtXYPoint)
     }
 
     
     override func setupAVCapture() {
-        super.setupAVCapture()
+        do {
+            try super.setupAVCapture()
+        } catch {
+            fatalError("Unable to configure the capture session.")
+        }
         
+       
         // setup Vision parts
         setupLayers()
         updateLayerGeometry()

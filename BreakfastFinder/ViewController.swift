@@ -8,20 +8,28 @@ Contains the view controller for the Breakfast Finder.
 import UIKit
 import AVFoundation
 import Vision
+import CoreImage
 
+@available(iOS 15.4, *)
 class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureDepthDataOutputDelegate {
+    
+    enum ConfigurationError: Error {
+        case lidarDeviceUnavailable
+        case requiredFormatUnavailable
+    }
     
     var bufferSize: CGSize = .zero
     var rootLayer: CALayer! = nil
     
     @IBOutlet weak private var previewView: UIView!
-    private let session = AVCaptureSession()
     private var previewLayer: AVCaptureVideoPreviewLayer! = nil
+    
+    private let session = AVCaptureSession()
+    
     private let videoDataOutput = AVCaptureVideoDataOutput()
     private let videoDepthDataOutput = AVCaptureDepthDataOutput()
     
     private let videoDataOutputQueue = DispatchQueue(label: "VideoDataOutput", qos: .userInitiated, attributes: [], autoreleaseFrequency: .workItem)
-    
     private let depthDataOutputQueue = DispatchQueue(label: "data queue", qos: .userInitiated, attributes: [], autoreleaseFrequency: .workItem)
     
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
@@ -30,7 +38,12 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        setupAVCapture()
+        do {
+            try setupAVCapture()
+        } catch {
+            fatalError("Unable to configure the capture session.")
+        }
+        
     }
     
     override func didReceiveMemoryWarning() {
@@ -38,11 +51,11 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
         // Dispose of any resources that can be recreated.
     }
     
-    func setupAVCapture() {
+    func setupAVCapture() throws {
         var deviceInput: AVCaptureDeviceInput!
         
         // Select a video device, make an input
-        let videoDevice = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInDualWideCamera], mediaType: .video, position: .back).devices.first
+        let videoDevice = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInLiDARDepthCamera], mediaType: .video, position: .back).devices.first
         do {
             deviceInput = try AVCaptureDeviceInput(device: videoDevice!)
             //print(videoDevice)
@@ -50,6 +63,10 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
             print("Could not create video device input: \(error)")
             return
         }
+        
+        
+        
+        
         
         session.beginConfiguration()
         session.sessionPreset = .vga640x480 // Model image size is smaller.
@@ -61,6 +78,7 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
             return
         }
         session.addInput(deviceInput)
+        
         if session.canAddOutput(videoDataOutput) {
             session.addOutput(videoDataOutput)
             // Add a video data output
@@ -68,7 +86,7 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
             videoDataOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)]
             videoDataOutput.setSampleBufferDelegate(self, queue: videoDataOutputQueue)
             
-            
+            // Add a depth data output
             session.addOutput(videoDepthDataOutput)
             videoDepthDataOutput.alwaysDiscardsLateDepthData = true
             videoDepthDataOutput.setDelegate(self, callbackQueue: depthDataOutputQueue)
@@ -85,7 +103,23 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
         // ADD
         
         
+        // Find a match that outputs video data in the format the app's custom Metal views require.
+        let preferredWidthResolution = 1920
+        guard let format = (videoDevice!.formats.last { format in
+            format.formatDescription.dimensions.width == preferredWidthResolution &&
+            format.formatDescription.mediaSubType.rawValue == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange &&
+            !format.isVideoBinned &&
+            !format.supportedDepthDataFormats.isEmpty
+        }) else {
+            throw ConfigurationError.requiredFormatUnavailable
+        }
         
+        // Find a match that outputs depth data in the format the app's custom Metal views require.
+        guard let depthFormat = (format.supportedDepthDataFormats.last { depthFormat in
+            depthFormat.formatDescription.mediaSubType.rawValue == kCVPixelFormatType_DepthFloat16
+        }) else {
+            throw ConfigurationError.requiredFormatUnavailable
+        }
         
         let captureConnection = videoDataOutput.connection(with: .video)
         // Always process the frames
@@ -95,6 +129,10 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
             let dimensions = CMVideoFormatDescriptionGetDimensions((videoDevice?.activeFormat.formatDescription)!)
             bufferSize.width = CGFloat(dimensions.width)
             bufferSize.height = CGFloat(dimensions.height)
+            
+            videoDevice!.activeFormat = format
+            videoDevice!.activeDepthDataFormat = depthFormat
+            
             videoDevice!.unlockForConfiguration()
         } catch {
             print(error)
